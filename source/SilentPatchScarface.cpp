@@ -14,4 +14,10 @@ void OnInitializeHook()
 		auto vblock = get_pattern( "52 6A 00 6A 00 50 FF 51 2C 50 E8 ? ? ? ? BA", -5 + 1 );
 		Patch<int32_t>( vblock, 0 );
 	}
+
+	// Allow the game to run on all cores
+	{
+		auto setAffinity = get_pattern( "56 8B 35 ? ? ? ? 8D 44 24 08", -3 );
+		Patch( setAffinity, { 0xC3 } ); // retn
+	}
 }
