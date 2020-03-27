@@ -47,4 +47,11 @@ void OnInitializeHook()
 		auto read = get_pattern( "83 EC 2C 8D 04 24 50", -6 );
 		InjectHook( read, ReadSetting, PATCH_JUMP );
 	}
+
+	// Remove D3DCREATE_MULTITHREADED flag from device creation, as the game does not actually need it
+	// and it might decrease performance
+	{
+		auto createdevice = get_pattern( "50 6A 01 57 51 FF 52 40", -2 + 1 );
+		Patch<int8_t>( createdevice, 0x40 ); // D3DCREATE_HARDWARE_VERTEXPROCESSING
+	}
 }
