@@ -1,6 +1,14 @@
 #include "Utils/MemoryMgr.h"
 #include "Utils/Patterns.h"
 
+#include "pure3d.h"
+
+static void* (*orgMalloc)(size_t size);
+void* scarMalloc( size_t size )
+{
+	return std::invoke( orgMalloc, size );
+}
+
 namespace INISettings
 {
 	bool WriteSetting( const char* key, int value )
@@ -23,6 +31,12 @@ void OnInitializeHook()
 	using namespace hook;
 
 	std::unique_ptr<ScopedUnprotect::Unprotect> Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
+
+	// Scarface malloc
+	{
+		auto alloc = get_pattern( "E8 ? ? ? ? 89 28" );
+		ReadCall( alloc, orgMalloc );
+	}
 
 
 	// Remove D3DLOCK_DISCARD flag from vertex locks, as game makes false assumptions about its behaviour
@@ -53,5 +67,34 @@ void OnInitializeHook()
 	{
 		auto createdevice = get_pattern( "50 6A 01 57 51 FF 52 40", -2 + 1 );
 		Patch<int8_t>( createdevice, 0x40 ); // D3DCREATE_HARDWARE_VERTEXPROCESSING
+	}
+
+	// Pooled D3D vertex and index buffers for improve performance
+	{
+		gpPure3d = *get_pattern<pure3d**>( "FF 52 10 A1", 3 + 1 );
+
+		auto createResources = pattern( "E8 ? ? ? ? 8B 4C 24 20 51 8B CE" ).get_one();
+	
+		auto vb = createResources.get<void>();
+		ReadCall( vb, pure3d::d3dPrimBuffer::orgCreateVertexBuffer );
+		InjectHook( vb, &pure3d::d3dPrimBuffer::GetOrCreateVertexBuffer );
+
+		auto ib = createResources.get<void>( 0xC );
+		ReadCall( ib, pure3d::d3dPrimBuffer::orgCreateIndexBuffer );
+		InjectHook( ib, &pure3d::d3dPrimBuffer::GetOrCreateIndexBuffer );
+
+		auto dtor = get_pattern( "8B 48 10 89 4E 0C 8B C6", 0xF + 3 );
+		ReadCall( dtor, pure3d::d3dPrimBuffer::orgDtor );
+		InjectHook( dtor, &pure3d::d3dPrimBuffer::ReclaimAndDestroy );
+
+		auto freeMem = get_pattern( "E8 ? ? ? ? 0F B7 4E 18" );
+		ReadCall( freeMem, pure3d::orgFreeMemory );
+
+		auto deviceLost1 = get_pattern( "75 26 E8 ? ? ? ? 8B 86 ? ? ? ?", 2 );
+		ReadCall( deviceLost1, pure3d::orgOnDeviceLost );
+		InjectHook( deviceLost1, pure3d::FlushCachesOnDeviceLost );
+
+		auto deviceLost2 = get_pattern( "88 8D ? ? ? ? E8", 6 );
+		InjectHook( deviceLost2, pure3d::FlushCachesOnDeviceLost );
 	}
 }
