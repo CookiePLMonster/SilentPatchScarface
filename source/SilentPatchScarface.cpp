@@ -100,7 +100,7 @@ void OnInitializeHook()
 	{
 		using namespace INISettings;
 
-		auto write = get_pattern( "74 5A 8B 0D ? ? ? ? 8D 44 24 2C", -0xA );
+		auto write = get_pattern( "8D 44 24 2C 50 68 3F 00 0F 00 6A 00 51", -0x12 );
 		InjectHook( write, WriteSetting, PATCH_JUMP );
 
 		auto read = get_pattern( "83 EC 2C 8D 04 24 50", -6 );
@@ -110,8 +110,20 @@ void OnInitializeHook()
 	// Remove D3DCREATE_MULTITHREADED flag from device creation, as the game does not actually need it
 	// and it might decrease performance
 	{
-		auto createdevice = get_pattern( "50 6A 01 57 51 FF 52 40", -2 + 1 );
-		Patch<int8_t>( createdevice, 0x40 ); // D3DCREATE_HARDWARE_VERTEXPROCESSING
+		// This code changed between 1.0 and 1.00.2 and building one pattern for both is not feasible
+		auto pattern10 = pattern( "51 8B 8D D8 01 00 00 6A 01 51 50 FF 52 40" ).count_hint(1); // 1.0
+		if ( pattern10.size() == 1 )
+		{
+			Patch<int8_t>( pattern10.get_first( -2 + 1 ), 0x40 ); // D3DCREATE_HARDWARE_VERTEXPROCESSING
+		}
+		else
+		{
+			auto pattern1002 = pattern( "50 6A 01 57 51 FF 52 40" ).count_hint(1); // 1.00.2
+			if ( pattern1002.size() == 1 )
+			{
+				Patch<int8_t>( pattern1002.get_first( -2 + 1 ), 0x40 ); // D3DCREATE_HARDWARE_VERTEXPROCESSING
+			}
+		}
 	}
 
 	// Pooled D3D vertex and index buffers for improve performance
@@ -139,7 +151,7 @@ void OnInitializeHook()
 		ReadCall( deviceLost1, pure3d::orgOnDeviceLost );
 		InjectHook( deviceLost1, pure3d::FlushCachesOnDeviceLost );
 
-		auto deviceLost2 = get_pattern( "88 8D ? ? ? ? E8", 6 );
+		auto deviceLost2 = get_pattern( "E8 ? ? ? ? 8B 06 8B 08 53" );
 		InjectHook( deviceLost2, pure3d::FlushCachesOnDeviceLost );
 	}
 
