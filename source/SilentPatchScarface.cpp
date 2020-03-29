@@ -3,6 +3,8 @@
 
 #include "pure3d.h"
 
+#include <set>
+
 static void* (*orgMalloc)(size_t size);
 void* scarMalloc( size_t size )
 {
@@ -21,6 +23,49 @@ namespace INISettings
 	int ReadSetting( const char* key )
 	{
 		return GetPrivateProfileIntA( "Scarface", key, -1, ".\\settings.ini" );
+	}
+}
+
+namespace ListAllResolutions
+{
+	static void (*orgInvokeScriptCommand)(const char* format, ...);
+
+	static void** pUnknown3dStruct; // Used to get the D3D device
+	static IDirect3D9* GetD3D()
+	{
+		// Ugly, but those structs are totally unknown at the moment
+		void* ptr1 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUnknown3dStruct) + 4);
+		void* d3dDisplay = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(ptr1) + 232);
+		if ( d3dDisplay != nullptr )
+		{
+			return *reinterpret_cast<IDirect3D9**>(reinterpret_cast<uintptr_t>(d3dDisplay) + 12);
+		}
+		return nullptr;
+	}
+
+	// Original function only lists a set of supported resolutions - list them all instead
+	static void ListResolutions()
+	{
+		IDirect3D9* d3d = GetD3D();
+		if ( d3d != nullptr )
+		{
+			// Filters out duplicates and sorts everything for us
+			std::set< std::pair<UINT, UINT> > resolutionsSet;
+
+			for ( UINT i = 0, j = d3d->GetAdapterModeCount( 0, D3DFMT_X8R8G8B8 ); i < j; i++ )
+			{
+				D3DDISPLAYMODE mode;
+				if ( SUCCEEDED(d3d->EnumAdapterModes( 0, D3DFMT_X8R8G8B8, i, &mode )) )
+				{
+					resolutionsSet.emplace( mode.Width, mode.Height );
+				}
+			}
+
+			for ( auto& it : resolutionsSet )
+			{
+				orgInvokeScriptCommand( "AddScreenResolutionEntry( %u, %u, %u );", it.second, it.first, 32 );
+			}
+		}
 	}
 }
 
@@ -96,5 +141,18 @@ void OnInitializeHook()
 
 		auto deviceLost2 = get_pattern( "88 8D ? ? ? ? E8", 6 );
 		InjectHook( deviceLost2, pure3d::FlushCachesOnDeviceLost );
+	}
+
+	// List all resolutions
+	{
+		using namespace ListAllResolutions;
+
+		pUnknown3dStruct = *get_pattern<void**>( "FF D7 8B 0D ? ? ? ? 83 C4 0C", 2 + 2 );
+
+		auto scriptCommand = get_pattern( "68 ? ? ? ? E8 ? ? ? ? 8B 53 14", 5 );
+		ReadCall( scriptCommand, orgInvokeScriptCommand );
+
+		auto listResolutions = get_pattern( "E8 ? ? ? ? A1 ? ? ? ? 85 C0 74 20" );
+		InjectHook( listResolutions, ListResolutions );
 	}
 }
