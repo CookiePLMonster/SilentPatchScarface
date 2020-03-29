@@ -69,6 +69,11 @@ namespace ListAllResolutions
 	}
 }
 
+// Stub for pure3d error checking
+static void CheckRefCountStub( uint32_t /*count*/ )
+{
+}
+
 
 void OnInitializeHook()
 {
@@ -153,6 +158,12 @@ void OnInitializeHook()
 
 		auto deviceLost2 = get_pattern( "E8 ? ? ? ? 8B 06 8B 08 53" );
 		InjectHook( deviceLost2, pure3d::FlushCachesOnDeviceLost );
+
+		// Remove a false positive from 1.0, where vb->Release() return value gets treated as HRESULT
+		// and breaks with our cache
+		pattern( "FF 52 08 50 E8 ? ? ? ? A1 ? ? ? ? 83 C4 04" ).for_each_result( []( pattern_match match ) {
+			InjectHook( match.get<void>( 4 ), CheckRefCountStub );
+		} );
 	}
 
 	// List all resolutions
