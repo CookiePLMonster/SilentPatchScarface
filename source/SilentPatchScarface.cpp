@@ -97,8 +97,11 @@ void OnInitializeHook()
 
 	// Allow the game to run on all cores
 	{
-		auto setAffinity = get_pattern( "56 8B 35 ? ? ? ? 8D 44 24 08", -3 );
-		Patch( setAffinity, { 0xC3 } ); // retn
+		if (INISettings::ReadSetting("All_Cores") == 1) {
+			printf("All_Cores k= 1 \n");
+			auto setAffinity = get_pattern("56 8B 35 ? ? ? ? 8D 44 24 08", -3);
+			Patch(setAffinity, { 0xC3 }); // retn
+		}
 	}
 
 	// Move settings to a settings.ini file in game directory (saves are already being stored there)
