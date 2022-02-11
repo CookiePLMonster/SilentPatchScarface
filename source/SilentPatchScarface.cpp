@@ -69,6 +69,78 @@ namespace ListAllResolutions
 	}
 }
 
+// Based very heavily on a fix for a similar issue in NFS Underground 2
+// https://github.com/ThirteenAG/WidescreenFixesPack/pull/1045
+// by CrabJournal
+namespace AffinityChanges
+{
+	DWORD_PTR gameThreadAffinity = 0;
+	static bool Init()
+	{
+		DWORD_PTR processAffinity, systemAffinity;
+		if (!GetProcessAffinityMask(GetCurrentProcess(), &processAffinity, &systemAffinity))
+		{
+			return false;
+		}
+
+		DWORD_PTR otherCoresAff = (processAffinity - 1) & processAffinity;
+		if (otherCoresAff == 0) // Only one core is available for the game
+		{
+			return false;
+		}
+		gameThreadAffinity = processAffinity & ~otherCoresAff;
+
+		SetThreadAffinityMask(GetCurrentThread(), gameThreadAffinity);
+
+		return true;
+	}
+
+	static HANDLE WINAPI CreateThread_GameThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize, LPTHREAD_START_ROUTINE lpStartAddress,
+			PVOID lpParameter, DWORD dwCreationFlags, LPDWORD lpThreadId)
+	{
+		HANDLE hThread = CreateThread(lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags | CREATE_SUSPENDED, lpThreadId);
+		if (hThread != nullptr)
+		{
+			SetThreadAffinityMask(hThread, gameThreadAffinity);
+			if ((dwCreationFlags & CREATE_SUSPENDED) == 0) // Resume only if the game didn't pass CREATE_SUSPENDED
+			{
+				ResumeThread(hThread);
+			}
+		}
+		return hThread;
+	}
+
+	static bool RedirectImports()
+	{
+		const DWORD_PTR instance = reinterpret_cast<DWORD_PTR>(GetModuleHandle(nullptr));
+		const PIMAGE_NT_HEADERS ntHeader = reinterpret_cast<PIMAGE_NT_HEADERS>(instance + reinterpret_cast<PIMAGE_DOS_HEADER>(instance)->e_lfanew);
+
+		// Find IAT
+		PIMAGE_IMPORT_DESCRIPTOR pImports = reinterpret_cast<PIMAGE_IMPORT_DESCRIPTOR>(instance + ntHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+
+		for ( ; pImports->Name != 0; pImports++ )
+		{
+			if ( _stricmp(reinterpret_cast<const char*>(instance + pImports->Name), "kernel32.dll") == 0 )
+			{
+				assert ( pImports->OriginalFirstThunk == 0 );
+
+				void** pFunctions = reinterpret_cast<void**>(instance + pImports->FirstThunk);
+
+				for ( ptrdiff_t j = 0; pFunctions[j] != nullptr; j++ )
+				{
+					if ( pFunctions[j] == &CreateThread )
+					{
+						pFunctions[j] = &CreateThread_GameThread;
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+}
+
 // Stub for pure3d error checking
 static void CheckRefCountStub( uint32_t /*count*/ )
 {
@@ -97,8 +169,18 @@ void OnInitializeHook()
 
 	// Allow the game to run on all cores
 	{
-		auto setAffinity = get_pattern( "56 8B 35 ? ? ? ? 8D 44 24 08", -3 );
-		Patch( setAffinity, { 0xC3 } ); // retn
+		// SingleCoreAffinity shouldn't be set, but allow for it in case of emergency
+		if (int singleCoreAffinity = INISettings::ReadSetting("SingleCoreAffinity"); singleCoreAffinity != 1)
+		{
+			using namespace AffinityChanges;
+
+			auto setAffinity = get_pattern( "56 8B 35 ? ? ? ? 8D 44 24 08", -3 );
+
+			if (Init() && RedirectImports())
+			{
+				Patch( setAffinity, { 0xC3 } ); // retn
+			}
+		}
 	}
 
 	// Move settings to a settings.ini file in game directory (saves are already being stored there)
