@@ -21,6 +21,9 @@ workspace "*"
 
 	files { "source/*.h", "source/*.cpp", "source/resources/*.rc" }
 
+	-- Disable exceptions in WIL
+	defines { "WIL_SUPPRESS_EXCEPTIONS" }
+
 	cppdialect "C++17"
 	staticruntime "on"
 	buildoptions { "/sdl" }
@@ -35,7 +38,7 @@ filter "configurations:Debug"
 	runtime "Debug"
 
  filter "configurations:Master"
-	defines { "NDEBUG" }
+	defines { "NDEBUG", "RESULT_DIAGNOSTICS_LEVEL=0", "RESULT_INCLUDE_CALLER_RETURNADDRESS=0" }
 	symbols "Off"
 
 filter "configurations:not Debug"
@@ -52,7 +55,9 @@ filter { "platforms:Win64" }
 	architecture "x86_64"
 
 filter { "toolset:*_xp"}
+	defines { "WINVER=0x0501", "_WIN32_WINNT=0x0501" } -- Target WinXP
 	buildoptions { "/Zc:threadSafeInit-" }
 
 filter { "toolset:not *_xp"}
-	buildoptions { "/permissive-" }
+	defines { "WINVER=0x0601", "_WIN32_WINNT=0x0601" } -- Target Win7
+	conformancemode "on"
