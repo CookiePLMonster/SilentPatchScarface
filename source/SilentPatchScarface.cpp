@@ -110,6 +110,15 @@ namespace AffinityChanges
 		return hThread;
 	}
 
+	static void ReplaceFunction(void** funcPtr)
+	{
+		DWORD dwProtect;
+
+		VirtualProtect(funcPtr, sizeof(*funcPtr), PAGE_READWRITE, &dwProtect);
+		*funcPtr = &CreateThread_GameThread;
+		VirtualProtect(funcPtr, sizeof(*funcPtr), dwProtect, &dwProtect);
+	}
+
 	static bool RedirectImports()
 	{
 		const DWORD_PTR instance = reinterpret_cast<DWORD_PTR>(GetModuleHandle(nullptr));
@@ -122,21 +131,35 @@ namespace AffinityChanges
 		{
 			if ( _stricmp(reinterpret_cast<const char*>(instance + pImports->Name), "kernel32.dll") == 0 )
 			{
-				assert ( pImports->OriginalFirstThunk == 0 );
-
-				void** pFunctions = reinterpret_cast<void**>(instance + pImports->FirstThunk);
-
-				for ( ptrdiff_t j = 0; pFunctions[j] != nullptr; j++ )
+				if ( pImports->OriginalFirstThunk != 0 )
 				{
-					if ( pFunctions[j] == &CreateThread )
+					const PIMAGE_THUNK_DATA pThunk = reinterpret_cast<PIMAGE_THUNK_DATA>(instance + pImports->OriginalFirstThunk);
+
+					for ( ptrdiff_t j = 0; pThunk[j].u1.AddressOfData != 0; j++ )
 					{
-						pFunctions[j] = &CreateThread_GameThread;
-						return true;
+						if ( strcmp(reinterpret_cast<PIMAGE_IMPORT_BY_NAME>(instance + pThunk[j].u1.AddressOfData)->Name, "CreateThread") == 0 )
+						{
+							void** pAddress = reinterpret_cast<void**>(instance + pImports->FirstThunk) + j;
+							ReplaceFunction(pAddress);
+							return true;
+						}
+					}
+				}
+				else
+				{
+					void** pFunctions = reinterpret_cast<void**>(instance + pImports->FirstThunk);
+
+					for ( ptrdiff_t j = 0; pFunctions[j] != nullptr; j++ )
+					{
+						if ( pFunctions[j] == &CreateThread )
+						{
+							ReplaceFunction(&pFunctions[j]);
+							return true;
+						}
 					}
 				}
 			}
 		}
-
 		return false;
 	}
 }
