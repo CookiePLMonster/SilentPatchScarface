@@ -150,27 +150,24 @@ static void CheckRefCountStub( uint32_t /*count*/ )
 void OnInitializeHook()
 {
 	using namespace Memory;
-	using namespace hook;
+	using namespace hook::txn;
 
 	std::unique_ptr<ScopedUnprotect::Unprotect> Protect = ScopedUnprotect::UnprotectSectionOrFullModule( GetModuleHandle( nullptr ), ".text" );
 
-	// Scarface malloc
-	{
-		auto alloc = get_pattern( "E8 ? ? ? ? 89 28" );
-		ReadCall( alloc, orgMalloc );
-	}
-
 
 	// Remove D3DLOCK_DISCARD flag from vertex locks, as game makes false assumptions about its behaviour
+	try
 	{
 		auto vblock = get_pattern( "52 6A 00 6A 00 50 FF 51 2C 50 E8 ? ? ? ? BA", -5 + 1 );
 		Patch<int32_t>( vblock, 0 );
 	}
+	TXN_CATCH();
 
 	// Allow the game to run on all cores
+	// SingleCoreAffinity shouldn't be set, but allow for it in case of emergency
+	if (int singleCoreAffinity = INISettings::ReadSetting("SingleCoreAffinity"); singleCoreAffinity != 1)
 	{
-		// SingleCoreAffinity shouldn't be set, but allow for it in case of emergency
-		if (int singleCoreAffinity = INISettings::ReadSetting("SingleCoreAffinity"); singleCoreAffinity != 1)
+		try
 		{
 			using namespace AffinityChanges;
 
@@ -181,21 +178,25 @@ void OnInitializeHook()
 				Patch( setAffinity, { 0xC3 } ); // retn
 			}
 		}
+		TXN_CATCH();
 	}
 
 	// Move settings to a settings.ini file in game directory (saves are already being stored there)
+	try
 	{
 		using namespace INISettings;
 
 		auto write = get_pattern( "8D 44 24 2C 50 68 3F 00 0F 00 6A 00 51", -0x12 );
-		InjectHook( write, WriteSetting, PATCH_JUMP );
-
 		auto read = get_pattern( "83 EC 2C 8D 04 24 50", -6 );
+
+		InjectHook( write, WriteSetting, PATCH_JUMP );	
 		InjectHook( read, ReadSetting, PATCH_JUMP );
 	}
+	TXN_CATCH();
 
 	// Remove D3DCREATE_MULTITHREADED flag from device creation, as the game does not actually need it
 	// and it might decrease performance
+	try
 	{
 		// This code changed between 1.0 and 1.00.2 and building one pattern for both is not feasible
 		auto pattern10 = pattern( "51 8B 8D D8 01 00 00 6A 01 51 50 FF 52 40" ).count_hint(1); // 1.0
@@ -212,12 +213,25 @@ void OnInitializeHook()
 			}
 		}
 	}
+	TXN_CATCH();
 
 	// Pooled D3D vertex and index buffers for improve performance
+	try
 	{
 		gpPure3d = *get_pattern<pure3d**>( "FF 52 10 A1", 3 + 1 );
 
 		auto createResources = pattern( "E8 ? ? ? ? 8B 4C 24 20 51 8B CE" ).get_one();
+		auto checkRefCount = pattern( "FF 52 08 50 E8 ? ? ? ? A1 ? ? ? ? 83 C4 04" );
+		auto alloc = get_pattern( "E8 ? ? ? ? 89 28" );
+		auto dtor = get_pattern( "8B 48 10 89 4E 0C 8B C6", 0xF + 3 );
+		auto freeMem = get_pattern( "E8 ? ? ? ? 0F B7 4E 18" );
+		auto deviceLost1 = get_pattern( "75 26 E8 ? ? ? ? 8B 86 ? ? ? ?", 2 );
+		auto deviceLost2 = get_pattern( "E8 ? ? ? ? 8B 06 8B 08 53" );
+
+		// Scarface malloc used internally in the cache
+		ReadCall( alloc, orgMalloc );
+
+		ReadCall( freeMem, pure3d::orgFreeMemory );
 	
 		auto vb = createResources.get<void>();
 		ReadCall( vb, pure3d::d3dPrimBuffer::orgCreateVertexBuffer );
@@ -227,37 +241,34 @@ void OnInitializeHook()
 		ReadCall( ib, pure3d::d3dPrimBuffer::orgCreateIndexBuffer );
 		InjectHook( ib, &pure3d::d3dPrimBuffer::GetOrCreateIndexBuffer );
 
-		auto dtor = get_pattern( "8B 48 10 89 4E 0C 8B C6", 0xF + 3 );
 		ReadCall( dtor, pure3d::d3dPrimBuffer::orgDtor );
 		InjectHook( dtor, &pure3d::d3dPrimBuffer::ReclaimAndDestroy );
 
-		auto freeMem = get_pattern( "E8 ? ? ? ? 0F B7 4E 18" );
-		ReadCall( freeMem, pure3d::orgFreeMemory );
-
-		auto deviceLost1 = get_pattern( "75 26 E8 ? ? ? ? 8B 86 ? ? ? ?", 2 );
 		ReadCall( deviceLost1, pure3d::orgOnDeviceLost );
 		InjectHook( deviceLost1, pure3d::FlushCachesOnDeviceLost );
 
-		auto deviceLost2 = get_pattern( "E8 ? ? ? ? 8B 06 8B 08 53" );
 		InjectHook( deviceLost2, pure3d::FlushCachesOnDeviceLost );
 
 		// Remove a false positive from 1.0, where vb->Release() return value gets treated as HRESULT
 		// and breaks with our cache
-		pattern( "FF 52 08 50 E8 ? ? ? ? A1 ? ? ? ? 83 C4 04" ).for_each_result( []( pattern_match match ) {
+		checkRefCount.for_each_result( []( pattern_match match ) {
 			InjectHook( match.get<void>( 4 ), CheckRefCountStub );
 		} );
 	}
+	TXN_CATCH();
 
 	// List all resolutions
+	try
 	{
 		using namespace ListAllResolutions;
 
 		pUnknown3dStruct = *get_pattern<void**>( "FF D7 8B 0D ? ? ? ? 83 C4 0C", 2 + 2 );
 
 		auto scriptCommand = get_pattern( "68 ? ? ? ? E8 ? ? ? ? 8B 53 14", 5 );
-		ReadCall( scriptCommand, orgInvokeScriptCommand );
-
 		auto listResolutions = get_pattern( "E8 ? ? ? ? A1 ? ? ? ? 85 C0 74 20" );
+
+		ReadCall( scriptCommand, orgInvokeScriptCommand );		
 		InjectHook( listResolutions, ListResolutions );
 	}
+	TXN_CATCH();
 }
