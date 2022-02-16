@@ -24,6 +24,15 @@ namespace INISettings
 	{
 		return GetPrivateProfileIntA( "Scarface", key, -1, ".\\settings.ini" );
 	}
+
+	float ReadFloatSetting(const char* key)
+	{
+		float value = 0.0f;
+		char buffer[32];
+		GetPrivateProfileStringA( "Scarface", key, "0.0", buffer, sizeof(buffer), ".\\settings.ini" );
+		sscanf_s(buffer, "%f", &value);
+		return value;
+	}
 }
 
 namespace ListAllResolutions
@@ -294,4 +303,87 @@ void OnInitializeHook()
 		InjectHook( listResolutions, ListResolutions );
 	}
 	TXN_CATCH();
+
+	// Adjust game camera speed
+	if (int camSpeedMultiplier = INISettings::ReadSetting("CameraSpeedMultiplier"); camSpeedMultiplier != -1)
+	{
+		try
+		{
+			// this 100.0 is used just for camera y variables so no problem overwriting it
+			auto y = get_pattern("B8 00 00 C8 42 C7 86 84 01 00 00", 1);
+			float origY = *(float*)(y);
+			Patch<float>(y, origY * camSpeedMultiplier);
+
+			// free look 
+			auto x = get_pattern("C7 86 84 01 00 00 00 00 48 43", 6);
+			float origX = *(float*)(x);
+			Patch<float>(x, origX * camSpeedMultiplier);
+
+			// aiming/gun
+			x = get_pattern("C7 86 8C 01 00 00 00 00 16 43", 6);
+			origX = *(float*)(x);
+			Patch<float>(x, origX * camSpeedMultiplier);
+
+			// rage mode
+			x = get_pattern("C7 86 94 01 00 00 00 00 96 43", 6);
+			origX = *(float*)(x);
+			Patch<float>(x, origX * camSpeedMultiplier);
+
+			// "disable" script handler so that script doesnt change new values
+			// nulling strings seems to do the trick
+
+			auto varName = get_pattern("52 61 67 65 53 70 65 65 64 59 00"); // RageSpeedY
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("52 61 67 65 53 70 65 65 64 58 00"); // RageSpeedX
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("46 72 65 65 4C 6F 6F 6B 53 70 65 65 64 59 00"); // FreeLookSpeedX
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("46 72 65 65 4C 6F 6F 6B 53 70 65 65 64 58 00 "); // FreeLookSpeedY
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("47 75 6E 53 70 65 65 64 59 00"); // GunSpeedY
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("47 75 6E 53 70 65 65 64 58 00"); // GunSpeedX
+			Patch<char>(varName, 0x00);
+		}
+		TXN_CATCH();
+	}
+
+	// Adjust FOV
+	if (float FOV = INISettings::ReadFloatSetting("FOV"); FOV != 0.0f)
+	{
+		try
+		{
+			// TODO: vehicle?
+			// on foot
+			auto oldFOV = get_pattern("B8 00 00 70 42 89 86 64 01 00 00", 1);
+			Patch<float>(oldFOV, FOV);
+
+			auto varName = get_pattern("45 78 74 65 72 69 6F 72 44 65 66 61 75 6C 74 46"); // ExteriorDefaultFOV
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("45 78 74 65 72 69 6F 72 43 6F 6D 62 61 74 46 4F"); // ExteriorCombatFOV
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("45 78 74 65 72 69 6F 72 4C 6F 63 6B 65 64 46 4F"); // ExteriorLockedFOV
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("49 6E 74 65 72 69 6F 72 44 65 66 61 75 6C 74 46"); // InteriorDefaultFOV
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("49 6E 74 65 72 69 6F 72 43 6F 6D 62 61 74 46 4F"); // InteriorCombatFOV
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("49 6E 74 65 72 69 6F 72 4C 6F 63 6B 65 64 46 4F"); // InteriorLockedFOV
+			Patch<char>(varName, 0x00);
+
+			varName = get_pattern("52 61 67 65 46 4F 56 00"); // RageFOV
+			Patch<char>(varName, 0x00);
+		}
+		TXN_CATCH();
+	}
 }
