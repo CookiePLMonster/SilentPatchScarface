@@ -24,6 +24,15 @@ namespace INISettings
 	{
 		return GetPrivateProfileIntA( "Scarface", key, -1, ".\\settings.ini" );
 	}
+
+	float ReadFloatSetting(const char* key)
+	{
+		float value = 0.0f;
+		char buffer[32];
+		GetPrivateProfileStringA( "Scarface", key, "0.0", buffer, sizeof(buffer), ".\\settings.ini" );
+		sscanf_s(buffer, "%f", &value);
+		return value;
+	}
 }
 
 namespace ListAllResolutions
@@ -294,4 +303,75 @@ void OnInitializeHook()
 		InjectHook( listResolutions, ListResolutions );
 	}
 	TXN_CATCH();
+
+	// Adjust game camera speed
+	if (int camSpeedMultiplier = INISettings::ReadSetting("CameraSpeedMultiplier"); camSpeedMultiplier != -1)
+	{
+		try
+		{
+			// this 100.0 is used just for camera y variables so no problem overwriting it
+			auto y = get_pattern("B8 00 00 C8 42 C7 86 84 01 00 00", 1);
+			auto freeX = get_pattern("C7 86 84 01 00 00 00 00 48 43", 6);
+			auto gunX = get_pattern("C7 86 8C 01 00 00 00 00 16 43", 6);
+			auto rageX = get_pattern("C7 86 94 01 00 00 00 00 96 43", 6);
+			// "disable" script handler so that script doesnt change new values
+			// nulling strings seems to do the trick
+			auto RageSpeedY = get_pattern("52 61 67 65 53 70 65 65 64 59 00");
+			auto RageSpeedX = get_pattern("52 61 67 65 53 70 65 65 64 58 00");
+			auto FreeLookSpeedX = get_pattern("46 72 65 65 4C 6F 6F 6B 53 70 65 65 64 59 00");
+			auto FreeLookSpeedY = get_pattern("46 72 65 65 4C 6F 6F 6B 53 70 65 65 64 58 00 ");
+			auto GunSpeedY = get_pattern("47 75 6E 53 70 65 65 64 59 00"); 
+			auto GunSpeedX = get_pattern("47 75 6E 53 70 65 65 64 58 00"); 
+
+			Patch<char>(RageSpeedY, 0x00);
+			Patch<char>(RageSpeedX, 0x00);
+			Patch<char>(FreeLookSpeedX, 0x00);
+			Patch<char>(FreeLookSpeedY, 0x00);
+			Patch<char>(GunSpeedY, 0x00);
+			Patch<char>(GunSpeedX, 0x00);
+
+			// shared y
+			float origY = *(float*)(y);
+			Patch<float>(y, origY * camSpeedMultiplier);
+
+			// freelook
+			float origX = *(float*)(freeX);
+			Patch<float>(freeX, origX * camSpeedMultiplier);
+			// aiming
+			origX = *(float*)(gunX);
+			Patch<float>(gunX, origX * camSpeedMultiplier);
+			// rage mode
+			origX = *(float*)(rageX);
+			Patch<float>(rageX, origX * camSpeedMultiplier);
+		}
+		TXN_CATCH();
+	}
+
+	// Adjust FOV
+	if (float FOV = INISettings::ReadFloatSetting("FOV"); FOV != 0.0f)
+	{
+		try
+		{
+			// TODO: vehicle?
+			// on foot
+			auto oldFOV = get_pattern("B8 00 00 70 42 89 86 64 01 00 00", 1);
+			auto ExteriorDefaultFOV = get_pattern("45 78 74 65 72 69 6F 72 44 65 66 61 75 6C 74 46"); 
+			auto ExteriorCombatFOV = get_pattern("45 78 74 65 72 69 6F 72 43 6F 6D 62 61 74 46 4F");
+			auto ExteriorLockedFOV = get_pattern("45 78 74 65 72 69 6F 72 4C 6F 63 6B 65 64 46 4F");
+			auto InteriorDefaultFOV = get_pattern("49 6E 74 65 72 69 6F 72 44 65 66 61 75 6C 74 46");
+			auto InteriorCombatFOV = get_pattern("49 6E 74 65 72 69 6F 72 43 6F 6D 62 61 74 46 4F");
+			auto InteriorLockedFOV = get_pattern("49 6E 74 65 72 69 6F 72 4C 6F 63 6B 65 64 46 4F");
+			auto RageFOV = get_pattern("52 61 67 65 46 4F 56 00"); 
+
+			Patch<float>(oldFOV, FOV);
+			Patch<char>(ExteriorDefaultFOV, 0x00);
+			Patch<char>(ExteriorCombatFOV, 0x00);
+			Patch<char>(ExteriorLockedFOV, 0x00);
+			Patch<char>(InteriorDefaultFOV, 0x00);
+			Patch<char>(InteriorCombatFOV, 0x00);
+			Patch<char>(InteriorLockedFOV, 0x00);
+			Patch<char>(RageFOV, 0x00);
+		}
+		TXN_CATCH();
+	}
 }
