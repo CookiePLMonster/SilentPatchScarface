@@ -17,5 +17,10 @@ most of the hitches present when driving around!
 * Introduced a cache for some D3D resources used by the game, dramatically reducing the amount of stutter when roaming around the city
 * Made the game list all selectable resolutions instead of a cherry picked list
 * Moved game's settings from the Registry to settings.ini in game directory - this resolves possible issues with saving settings
+* Added an option to adjust the camera speed from settings.ini via a `CameraSpeedMultiplier` option
+* Added an option to adjust Field of View from settings.ini via a `FOV` option
+
+## Credits
+* [ermaccer](https://github.com/ermaccer) - `CameraSpeedMultiplier` and `FOV` options
 
 ![preview](https://i.imgur.com/XnNcJpM.png)
